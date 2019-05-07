@@ -1,0 +1,169 @@
+## Função que calcula a log-verossimilhança de um processo de poisson (espacial)
+log.like <- function(S,pts,area,lambda.0){
+  # Menor retângulo contendo a região de estudo
+  min.x <- min(area[,1]); max.x <- max(area[,1])
+  min.y <- min(area[,2]); max.y <- max(area[,2])
+  # Largura de banda ótimo
+  h1 <- sd(pts[,1])*(1/nrow(pts))^(1/6)
+  h2 <- sd(pts[,2])*(1/nrow(pts))^(1/6)
+  aux.int <- rep(0,nrow(S))
+  for (i in 1:nrow(S)){
+    numerador <- dnorm(S[i,1],pts[,1],sd=h1)*dnorm(S[i,2],pts[,2],sd=h2)
+    denominador <- (pnorm(max.x,pts[,1],sd=h1)-pnorm(min.x,pts[,1],sd=h1))*
+      (pnorm(max.y,pts[,2],sd=h2)-pnorm(min.y,pts[,2],sd=h2))
+    aux.int[i] <- sum(numerador/denominador)*(lambda.0/nrow(pts))
+  }
+  
+  log.likelihood <- sum(log(aux.int)) - lambda.0
+  
+  return(log.likelihood)
+}
+
+## Estimador não-paramétrico da função de intensidade de um procesos de poisson
+np.intensity <- function(pts,area,lambda.0,n=20){
+  min.x <- min(area[,1]); max.x <- max(area[,1])
+  min.y <- min(area[,2]); max.y <- max(area[,2])
+  # Largura de banda ótimo
+  h1 <- sd(pts[,1])*(1/nrow(pts))^(1/6)
+  h2 <- sd(pts[,2])*(1/nrow(pts))^(1/6)
+  #
+  x <- seq(min.x,max.x,len=n); y <- seq(min.y,max.y,len=n)
+  lambda <- matrix(0,n,n)
+  for(ii in 1:n){
+    for(jj in 1:n){
+      aux.n <- dnorm(x[ii],pts[,1],sd=h1)*dnorm(y[jj],pts[,2],sd=h2)
+      aux.d <- (pnorm(max.x,pts[,1],sd=h1)-pnorm(min.x,pts[,1],sd=h1))*
+        (pnorm(max.y,pts[,2],sd=h2)-pnorm(min.y,pts[,2],sd=h2))
+      aux.soma <- sum(aux.n/aux.d)
+      lambda[ii,jj] <- (lambda.0/nrow(pts))*aux.soma
+    }
+  }
+  return(lambda)
+}
+
+
+# função que gera um processo de Poisson homogêneo ou não-homogêneo
+gpp <- function(intensidade,max=NULL,area){
+  require(splancs)
+  minX <- min(area[,1]); maxX <- max(area[,1])
+  minY <- min(area[,2]); maxY <- max(area[,2])
+  if(is.function(intensidade)){
+    n <- rpois(1,max)
+    X <- NULL
+    for (i in 1:n){
+      x <- cbind(runif(1,minX,maxX),runif(1,minY,maxY))
+      if (inout(x,area)){
+        X <- rbind(X,x)
+      } else {
+        while (inout(x,area)==F){
+          x <- cbind(runif(1,minX,maxX),runif(1,minY,maxY))
+        }
+        X <- rbind(X,x)
+      }
+    }
+    p <- intensidade(X[,1],X[,2])/max
+    pontos <- NULL
+    for (i in 1:nrow(X)){
+      if(p[i]>=runif(1)){
+        pontos <- rbind(pontos,X[i,])
+      }
+    }
+  } else {
+    n <- rpois(1,intensidade*areapl(area))
+    pontos <- NULL
+    for (i in 1:n){
+      x <- cbind(runif(1,minX,maxX),runif(1,minY,maxY))
+      if (inout(x,area)){
+        pontos <- rbind(pontos,x)
+      } else {
+        while (inout(x,area)==F){
+          x <- cbind(runif(1,minX,maxX),runif(1,minY,maxY))
+        }
+        pontos <- rbind(pontos,x)
+      }
+    }
+  }
+  return(pontos)
+}
+
+# EXEMPLO DE APLICAÇÃO NO QUADRADO UNITÁRIO
+set.seed(505)
+w1 <- matrix(c(0,0,0,1,1,1,1,0,0,0),5,2,byrow=T)
+X <- gpp(function(x,y){100*x+200*y},max=300,area=w1)
+plot(X,xlab="",ylab="",col="blue",asp=1)
+
+
+m <- 40 # número de pontos
+h1 <- sd(X[,1])*(1/nrow(X))^(1/6) # largura de banda ótimo
+h2 <- sd(X[,2])*(1/nrow(X))^(1/6) # largura de banda ótimo
+X.0 <- NULL
+
+for(i in 1:m){
+  ind <- sample(1:nrow(X),1)
+  out <- TRUE
+  while(out){
+    ponto.prop <- cbind(rnorm(1,X[ind,1],sd=h1),rnorm(1,X[ind,2],sd=h2))
+    if(inout(ponto.prop,w1)){
+      out <- FALSE
+      X.0 <- rbind(X.0,ponto.prop)
+    }
+  }
+}
+
+inicial <- list()
+l <- rgamma(1,nrow(X),1)
+inicial$lambda <- np.intensity(X.0,w1,l)
+inicial$loglike <- log.like(X,X.0,w1,l)
+
+n.sim <- 50000
+pts <- X.0
+lambdas <- list()
+log.vero <- rep(0,n.sim)
+lambdas.0 <- rep(0,n.sim)
+lambdas[[1]] <- inicial$lambda
+log.vero[1] <- inicial$loglike
+lambdas.0[1] <- l
+k <- 7
+tx.ac <- 0
+lambdas.rej <- list()
+
+for (i in 2:n.sim){
+  indice <- sample(nrow(pts),k,replace = F) # Linha sorteada para ser "deletada".
+  cand <- rbind(pts[-indice,],cbind(runif(k),runif(k))) # Padrão Pontual candidato.
+  lambdas.0[i] <- rgamma(1,nrow(X),1)
+  auxiliar <- log.like(X,cand,w1,lambdas.0[i]) # Quantidades necessárias para avaliar o PP candidato.
+  ratio <- auxiliar - log.vero[i-1]
+  if (exp(ratio)>runif(1)){
+    lambdas[[i]] <- np.intensity(cand,w1,lambdas.0[i])
+    log.vero[i] <- auxiliar
+    pts <- cand
+    tx.ac <- tx.ac + 1
+  } else {
+    lambdas[[i]] <- lambdas[[i-1]]
+    #lambdas.rej[[i]] <- np.intensity(cand,w1,lambdas.0[i])
+    log.vero[i] <- log.vero[i-1]
+  }
+  if (((i/n.sim)*100) %in% seq(10,100,5)){
+    print(paste(round((i/n.sim)*100,2),"%",sep=""))
+  }
+}
+
+#########################
+# Plotando os resultados#
+#########################
+
+x.grid <- seq(0,1,len=20)
+y.grid <- seq(0,1,len=20)
+
+library(plotly)
+
+plot_ly(x=x.grid,y=y.grid,z=t(lambdas[[50]]),type="contour",
+        colorscale="Jet", contours = list(showlabels = TRUE,end=300,
+        size=10,start=0)) %>% colorbar(title="Intensidade") 
+
+
+
+
+
+
+
