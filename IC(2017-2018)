@@ -1,4 +1,5 @@
 ## Função que calcula a log-verossimilhança de um processo de poisson (espacial)
+
 log.like <- function(S,pts,area,lambda.0){
   # Menor retângulo contendo a região de estudo
   min.x <- min(area[,1]); max.x <- max(area[,1])
