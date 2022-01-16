@@ -20,6 +20,7 @@ log.like <- function(S,pts,area,lambda.0){
   return(log.likelihood)
 }
 
+
 ## Estimador não-paramétrico da função de intensidade de um procesos de poisson
 np.intensity <- function(pts,area,lambda.0,n=20){
   min.x <- min(area[,1]); max.x <- max(area[,1])
